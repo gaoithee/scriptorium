@@ -1,0 +1,19 @@
+ollama_base_url: "http://localhost:11434"
+
+# VLM for end-to-end transcription
+vlm_model: "qwen2.5vl:7b"          # options: qwen2.5vl:7b | qwen2.5vl:72b
+
+# Small LM used to post-correct the classic OCR output
+corrector_model: "qwen2.5:3b"
+
+# OCR backend for the classic pipeline
+ocr_backend: "easyocr"              # easyocr | tesseract
+
+# Layout detection backend (splits image into line regions before OCR)
+layout_backend: "doctr"             # doctr | none
+
+# Language hint passed to EasyOCR / Tesseract
+language: "it"                      # it | en | fr | de | ...
+
+# Save annotated layout image alongside results
+save_layout_debug: true

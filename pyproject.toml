@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "handwriting-ocr-benchmark"
+version = "0.1.0"
+description = "Benchmark handwriting OCR: classic pipeline vs Qwen2.5-VL"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # OCR / layout
+    "python-doctr[torch]>=0.8",
+    "easyocr>=1.7",
+    # image processing
+    "Pillow>=10.0",
+    "opencv-python-headless>=4.9",
+    "numpy>=1.26",
+    # Ollama client (local LLM inference)
+    "ollama>=0.2",
+    # eval
+    "jiwer>=3.0",
+    "sacrebleu>=2.4",
+    # CLI / config
+    "typer>=0.12",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+    # reporting
+    "tabulate>=0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov",
+    "ruff",
+    "black",
+]
+
+[project.scripts]
+ocr-bench = "scripts.run_benchmark:app"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.black]
+line-length = 100

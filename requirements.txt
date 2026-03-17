@@ -1,0 +1,35 @@
+# Core
+python-doctr[torch]>=0.8
+easyocr>=1.7
+Pillow>=10.0
+opencv-python-headless>=4.9
+numpy>=1.26
+ollama>=0.2
+
+# Eval
+jiwer>=3.0
+sacrebleu>=2.4
+
+# CLI / config
+typer>=0.12
+pyyaml>=6.0
+rich>=13.0
+tabulate>=0.9
+
+# Web UI (optional)
+gradio>=4.0
+
+# HuggingFace fallback (optional)
+# transformers>=4.45
+# accelerate>=0.30
+# qwen-vl-utils>=0.0.8
+# bitsandbytes>=0.43   # for 4-bit quantization
+
+# Tesseract backend (optional)
+# pytesseract>=0.3
+
+# Dev
+pytest>=8.0
+pytest-cov
+ruff
+black
