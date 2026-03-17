@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+
+# results (keep the directory, not the generated files)
+results/*.json
+results/*.md
+
+# layout debug images
+*_layout_debug.jpg
+
+# model caches
+.torch/
+.easyocr/
+~/.cache/doctr/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# editors
+.vscode/
+.idea/
+*.swp

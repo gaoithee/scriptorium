@@ -1,0 +1,4 @@
+# Drop your handwriting scan images here (.jpg, .png)
+# The file stem must match the corresponding gold .txt in ../gold/
+# Example:
+#   data/samples/page01.jpg  →  data/gold/page01.txt

@@ -1,0 +1,30 @@
+# Inference server for Qwen3.5-9B (OpenAI-compatible)
+# Launch with vLLM:  vllm serve Qwen/Qwen3.5-9B --reasoning-parser qwen3 --port 8000
+# Launch with SGLang: python -m sglang.launch_server --model-path Qwen/Qwen3.5-9B --reasoning-parser qwen3
+vlm_api_base: "http://localhost:8000/v1"
+vlm_api_key: "EMPTY"
+vlm_model: "Qwen/Qwen3.5-9B"
+
+# Small LM for OCR post-correction (classic pipeline only)
+# Any OpenAI-compatible endpoint works here too, or keep Ollama
+corrector_api_base: "http://localhost:11434/v1"   # Ollama OpenAI-compat endpoint
+corrector_api_key: "EMPTY"
+corrector_model: "qwen2.5:3b"                      # or Qwen/Qwen3.5-9B if you have VRAM to spare
+
+# OCR backend for the classic pipeline
+ocr_backend: "easyocr"      # easyocr | tesseract
+
+# Layout detection
+layout_backend: "doctr"     # doctr | none
+
+# Language hint passed to OCR and VLM prompt
+language: "it"              # it | en | fr | de | ...
+
+# Preprocessing (deskew, denoise, CLAHE) before OCR
+preprocess: true
+
+# Save annotated layout image alongside results
+save_layout_debug: false
+
+# Disable VLM chain-of-thought (recommended for OCR — faster and cleaner)
+vlm_thinking: false
