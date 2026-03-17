@@ -5,16 +5,7 @@ Gradio web interface for the handwriting OCR benchmark.
 
 Launch with:
     python scripts/app.py
-    # or with custom port:
-    python scripts/app.py --port 7861
-
-Features
---------
-- Upload a handwriting image
-- Paste your gold string
-- Choose which approaches to run (pipeline, VLM, or both)
-- See side-by-side transcriptions and metrics
-- Download the JSON result
+    python scripts/app.py --port 7861 --share
 """
 from __future__ import annotations
 
@@ -45,26 +36,21 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("app")
 
 DEFAULT_CONFIG = {
-    "ollama_base_url": "http://localhost:11434",
-    "vlm_model": "qwen2.5vl:7b",
-    "corrector_model": "qwen2.5:3b",
-    "ocr_backend": "easyocr",
+    "vlm_api_base":  "http://localhost:8000/v1",
+    "vlm_api_key":   "EMPTY",
+    "vlm_model":     "Qwen/Qwen3.5-9B",
+    "vlm_thinking":  False,
+    "corrector_api_base": "http://localhost:11434/v1",
+    "corrector_api_key":  "EMPTY",
+    "corrector_model":    "qwen2.5:3b",
+    "ocr_backend":    "easyocr",
     "layout_backend": "doctr",
-    "language": "it",
-    "save_layout_debug": False,
+    "language":       "it",
 }
 
 
-def load_cfg(config_path: str | None = None) -> dict:
-    cfg = DEFAULT_CONFIG.copy()
-    if config_path and Path(config_path).exists():
-        with open(config_path) as f:
-            cfg.update(yaml.safe_load(f) or {})
-    return cfg
-
-
 # ---------------------------------------------------------------------------
-# Core inference function called by Gradio
+# Core inference
 # ---------------------------------------------------------------------------
 
 def run_inference(
@@ -75,51 +61,39 @@ def run_inference(
     language: str,
     ocr_backend: str,
     vlm_model: str,
+    vlm_api_base: str,
     corrector_model: str,
-    ollama_url: str,
+    corrector_api_base: str,
     do_preprocess: bool,
+    vlm_thinking: bool,
 ) -> tuple[str, str, str, str, str, str]:
-    """
-    Returns (raw_ocr, pipeline_text, vlm_text, pipeline_metrics, vlm_metrics, json_download_path)
-    """
     if image_pil is None:
         return "", "", "", "⚠️ Upload an image first.", "", ""
 
-    cfg = {
-        "ollama_base_url": ollama_url,
-        "vlm_model": vlm_model,
-        "corrector_model": corrector_model,
-        "ocr_backend": ocr_backend,
-        "layout_backend": "doctr",
-        "language": language,
-        "save_layout_debug": False,
-    }
-
-    # Save uploaded PIL image to a temp file (needed by DocTR / VLM)
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
         tmp_path = Path(tmp.name)
         image_pil.save(tmp_path, format="JPEG")
 
-    results: dict = {"gold": gold_string, "config": cfg}
+    results: dict = {"gold": gold_string}
     raw_ocr = pipeline_text = vlm_text = ""
     pipeline_metrics_str = vlm_metrics_str = ""
 
     try:
         working_image = preprocess(image_pil) if do_preprocess else image_pil
 
-        # ── Pipeline ──────────────────────────────────────────────────────
         if run_pipeline:
-            pil_img, regions = detect_layout(tmp_path, backend=cfg["layout_backend"])
+            pil_img, regions = detect_layout(tmp_path, backend="doctr")
             raw_ocr = ocr_regions(
                 working_image, regions,
-                backend=cfg["ocr_backend"],
-                language=cfg["language"],
+                backend=ocr_backend,
+                language=language,
             )
             pipeline_text = correct_with_llm(
                 raw_ocr,
-                model=cfg["corrector_model"],
-                ollama_base_url=cfg["ollama_base_url"],
-                language=cfg["language"],
+                model=corrector_model,
+                api_base=corrector_api_base,
+                api_key="EMPTY",
+                language=language,
             )
             if gold_string.strip():
                 r = evaluate(pipeline_text, gold_string)
@@ -133,13 +107,14 @@ def run_inference(
                     "metrics": r.to_dict(),
                 }
 
-        # ── VLM ───────────────────────────────────────────────────────────
         if run_vlm:
             vlm_text = transcribe_with_vlm(
                 tmp_path,
-                model=cfg["vlm_model"],
-                ollama_base_url=cfg["ollama_base_url"],
-                language=cfg["language"],
+                model=vlm_model,
+                api_base=vlm_api_base,
+                api_key="EMPTY",
+                language=language,
+                thinking=vlm_thinking,
             )
             if gold_string.strip():
                 r = evaluate(vlm_text, gold_string)
@@ -155,11 +130,9 @@ def run_inference(
     except Exception as exc:
         logger.exception("Inference error")
         return str(exc), "", "", "Error", "Error", ""
-
     finally:
         tmp_path.unlink(missing_ok=True)
 
-    # Write JSON to a temp file so Gradio can serve it as a download
     json_tmp = tempfile.NamedTemporaryFile(
         suffix=".json", delete=False, mode="w", encoding="utf-8"
     )
@@ -174,11 +147,11 @@ def run_inference(
 # ---------------------------------------------------------------------------
 
 def build_ui() -> gr.Blocks:
-    with gr.Blocks(title="Handwriting OCR Benchmark", theme=gr.themes.Soft()) as demo:
+    with gr.Blocks(title="scriptorium", theme=gr.themes.Soft()) as demo:
         gr.Markdown(
-            "# ✍️ Handwriting OCR Benchmark\n"
-            "Compare **Classic Pipeline** (DocTR → EasyOCR → Qwen2.5:3b) "
-            "vs **Qwen2.5-VL** end-to-end on your handwriting scans."
+            "# scriptorium\n"
+            "Classic pipeline (DocTR → EasyOCR → LM correction) "
+            "vs **Qwen3.5-9B** end-to-end."
         )
 
         with gr.Row():
@@ -190,17 +163,31 @@ def build_ui() -> gr.Blocks:
                     lines=4,
                 )
                 with gr.Accordion("⚙️ Options", open=False):
-                    language    = gr.Dropdown(
+                    language        = gr.Dropdown(
                         ["it", "en", "fr", "de", "es", "la"],
                         value="it", label="Language"
                     )
-                    ocr_backend = gr.Dropdown(
+                    ocr_backend     = gr.Dropdown(
                         ["easyocr", "tesseract"], value="easyocr", label="OCR backend"
                     )
-                    vlm_model   = gr.Textbox(value="qwen2.5vl:7b",  label="VLM model (Ollama tag)")
-                    corrector   = gr.Textbox(value="qwen2.5:3b",    label="Corrector model (Ollama tag)")
-                    ollama_url  = gr.Textbox(value="http://localhost:11434", label="Ollama URL")
-                    do_preproc  = gr.Checkbox(value=True, label="Apply image preprocessing (deskew, denoise, CLAHE)")
+                    vlm_model       = gr.Textbox(
+                        value="Qwen/Qwen3.5-9B", label="VLM model"
+                    )
+                    vlm_api_base    = gr.Textbox(
+                        value="http://localhost:8000/v1", label="VLM API base (vLLM / SGLang)"
+                    )
+                    corrector_model = gr.Textbox(
+                        value="qwen2.5:3b", label="Corrector model"
+                    )
+                    corrector_api   = gr.Textbox(
+                        value="http://localhost:11434/v1", label="Corrector API base"
+                    )
+                    vlm_thinking    = gr.Checkbox(
+                        value=False, label="Enable VLM thinking mode (slower)"
+                    )
+                    do_preproc      = gr.Checkbox(
+                        value=True, label="Preprocess image (deskew, denoise, CLAHE)"
+                    )
 
                 with gr.Row():
                     run_pipe = gr.Checkbox(value=True,  label="Run Pipeline")
@@ -210,13 +197,13 @@ def build_ui() -> gr.Blocks:
 
             with gr.Column(scale=2):
                 with gr.Tab("Pipeline"):
-                    raw_ocr_out  = gr.Textbox(label="Raw OCR output",             lines=6, interactive=False)
-                    pipe_text_out = gr.Textbox(label="After LM post-correction",   lines=6, interactive=False)
-                    pipe_metrics  = gr.Textbox(label="Metrics vs gold",            lines=5, interactive=False)
+                    raw_ocr_out   = gr.Textbox(label="Raw OCR",             lines=6, interactive=False)
+                    pipe_text_out = gr.Textbox(label="After LM correction",  lines=6, interactive=False)
+                    pipe_metrics  = gr.Textbox(label="Metrics vs gold",      lines=5, interactive=False)
 
-                with gr.Tab("VLM (Qwen2.5-VL)"):
-                    vlm_text_out  = gr.Textbox(label="VLM transcription",          lines=8, interactive=False)
-                    vlm_metrics   = gr.Textbox(label="Metrics vs gold",            lines=5, interactive=False)
+                with gr.Tab("VLM — Qwen3.5-9B"):
+                    vlm_text_out  = gr.Textbox(label="VLM transcription",   lines=8, interactive=False)
+                    vlm_metrics   = gr.Textbox(label="Metrics vs gold",      lines=5, interactive=False)
 
                 json_download = gr.File(label="Download JSON result")
 
@@ -225,8 +212,10 @@ def build_ui() -> gr.Blocks:
             inputs=[
                 image_input, gold_input,
                 run_pipe, run_vlm,
-                language, ocr_backend, vlm_model, corrector, ollama_url,
-                do_preproc,
+                language, ocr_backend,
+                vlm_model, vlm_api_base,
+                corrector_model, corrector_api,
+                do_preproc, vlm_thinking,
             ],
             outputs=[
                 raw_ocr_out, pipe_text_out, vlm_text_out,
@@ -246,13 +235,11 @@ cli = typer.Typer()
 
 @cli.command()
 def main(
-    port: int = typer.Option(7860, "--port", "-p"),
-    share: bool = typer.Option(False, "--share", help="Create a public Gradio link"),
-    config: str = typer.Option(None, "--config", "-c"),
+    port:  int  = typer.Option(7860, "--port", "-p"),
+    share: bool = typer.Option(False, "--share"),
 ):
     """Launch the Gradio web UI."""
-    app = build_ui()
-    app.launch(server_port=port, share=share)
+    build_ui().launch(server_port=port, share=share)
 
 
 if __name__ == "__main__":

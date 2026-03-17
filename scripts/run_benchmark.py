@@ -62,12 +62,18 @@ logger = logging.getLogger("benchmark")
 # ---------------------------------------------------------------------------
 
 DEFAULT_CONFIG = {
-    "ollama_base_url": "http://localhost:11434",
-    "vlm_model": "qwen2.5vl:7b",
-    "corrector_model": "qwen2.5:3b",
+    "vlm_api_base":  "http://localhost:8000/v1",
+    "vlm_api_key":   "EMPTY",
+    "vlm_thinking":  False,
+    "corrector_api_base": "http://localhost:11434/v1",
+    "corrector_api_key":  "EMPTY",
+    "corrector_model":    "qwen2.5:3b",
+    "vlm_model":     "Qwen/Qwen3.5-9B",
+
     "ocr_backend": "easyocr",
     "layout_backend": "doctr",
     "language": "it",
+    "preprocess":     True,
     "save_layout_debug": False,
 }
 
@@ -121,7 +127,8 @@ def run_single(
     pipeline_text = correct_with_llm(
         raw_ocr,
         model=cfg["corrector_model"],
-        ollama_base_url=cfg["ollama_base_url"],
+        api_base=cfg["corrector_api_base"],
+        api_key=cfg["corrector_api_key"],
         language=cfg["language"],
     )
     console.print(f"  → Corrected:\n{_preview(pipeline_text)}")
@@ -144,8 +151,10 @@ def run_single(
     vlm_text = transcribe_with_vlm(
         image_path,
         model=cfg["vlm_model"],
-        ollama_base_url=cfg["ollama_base_url"],
+        api_base=cfg["vlm_api_base"],
+        api_key=cfg["vlm_api_key"],
         language=cfg["language"],
+        thinking=cfg.get("vlm_thinking", False),
     )
     vlm_time = time.perf_counter() - t0
 

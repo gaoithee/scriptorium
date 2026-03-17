@@ -1,28 +1,34 @@
-.PHONY: install dev test lint format run app pull-models
+.PHONY: install dev test lint format serve-vlm serve-corrector run app eval-all
 
 ## Install package in editable mode
 install:
 	pip install -e .
 
-## Install with dev extras
+## Install with dev + runtime extras
 dev:
-	pip install -e ".[dev]" jiwer sacrebleu gradio
+	pip install -e ".[dev]" jiwer sacrebleu gradio openai
 
 ## Run unit tests
 test:
 	pytest tests/ -v --tb=short
 
-## Lint with ruff
+## Lint
 lint:
 	ruff check src/ scripts/ tests/
 
-## Auto-format with black
+## Format
 format:
 	black src/ scripts/ tests/
 
-## Pull required Ollama models
-pull-models:
-	ollama pull qwen2.5vl:7b
+## Serve Qwen3.5-9B with vLLM (requires a GPU)
+serve-vlm:
+	vllm serve Qwen/Qwen3.5-9B \
+		--reasoning-parser qwen3 \
+		--port 8000 \
+		--max-model-len 32768
+
+## Serve corrector via Ollama
+serve-corrector:
 	ollama pull qwen2.5:3b
 
 ## Run benchmark on a single image (set IMAGE and GOLD env vars)

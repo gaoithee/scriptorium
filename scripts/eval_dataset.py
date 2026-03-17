@@ -44,12 +44,17 @@ logger = logging.getLogger("eval_dataset")
 console = Console()
 
 DEFAULT_CONFIG = {
-    "ollama_base_url": "http://localhost:11434",
-    "vlm_model": "qwen2.5vl:7b",
-    "corrector_model": "qwen2.5:3b",
-    "ocr_backend": "easyocr",
+    "vlm_api_base":  "http://localhost:8000/v1",
+    "vlm_api_key":   "EMPTY",
+    "vlm_model":     "Qwen/Qwen3.5-9B",
+    "vlm_thinking":  False,
+    "corrector_api_base": "http://localhost:11434/v1",
+    "corrector_api_key":  "EMPTY",
+    "corrector_model":    "qwen2.5:3b",
+    "ocr_backend":    "easyocr",
     "layout_backend": "doctr",
-    "language": "it",
+    "language":       "it",
+    "preprocess":     True,
 }
 
 app = typer.Typer()
@@ -92,12 +97,20 @@ def main(
             if preprocess_images:
                 pil_img = preprocess(pil_img)
 
-            # Pipeline
+            # ── Pipeline ──────────────────────────────────────────────────
             t0 = time.perf_counter()
-            raw_ocr = ocr_regions(pil_img, regions, backend=cfg["ocr_backend"], language=cfg["language"])
-            corrected = correct_with_llm(raw_ocr, model=cfg["corrector_model"],
-                                         ollama_base_url=cfg["ollama_base_url"],
-                                         language=cfg["language"])
+            raw_ocr = ocr_regions(
+                pil_img, regions,
+                backend=cfg["ocr_backend"],
+                language=cfg["language"],
+            )
+            corrected = correct_with_llm(
+                raw_ocr,
+                model=cfg["corrector_model"],
+                api_base=cfg["corrector_api_base"],
+                api_key=cfg["corrector_api_key"],
+                language=cfg["language"],
+            )
             pipe_t = round(time.perf_counter() - t0, 2)
             pipe_eval = evaluate(corrected, gold)
 
@@ -110,11 +123,16 @@ def main(
                 "pipeline_time_s":    pipe_t,
             })
 
-            # VLM
+            # ── VLM ───────────────────────────────────────────────────────
             t0 = time.perf_counter()
-            vlm_text = transcribe_with_vlm(img_path, model=cfg["vlm_model"],
-                                           ollama_base_url=cfg["ollama_base_url"],
-                                           language=cfg["language"])
+            vlm_text = transcribe_with_vlm(
+                img_path,
+                model=cfg["vlm_model"],
+                api_base=cfg["vlm_api_base"],
+                api_key=cfg["vlm_api_key"],
+                language=cfg["language"],
+                thinking=cfg.get("vlm_thinking", False),
+            )
             vlm_t = round(time.perf_counter() - t0, 2)
             vlm_eval = evaluate(vlm_text, gold)
 
@@ -133,10 +151,9 @@ def main(
         rows.append(row)
         _print_row_summary(row)
 
-    # ── Aggregate ──────────────────────────────────────────────────────────
+    # ── Save outputs ──────────────────────────────────────────────────────
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
-    # CSV
     csv_path = output / f"benchmark_{ts}.csv"
     if rows:
         fieldnames = list(rows[0].keys())
@@ -144,18 +161,16 @@ def main(
             writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(rows)
-        console.print(f"\n[green]CSV saved:[/green] {csv_path}")
+        console.print(f"\n[green]CSV:[/green] {csv_path}")
 
-    # JSON
     json_path = output / f"benchmark_{ts}.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump({"config": cfg, "results": rows}, f, ensure_ascii=False, indent=2)
-    console.print(f"[green]JSON saved:[/green] {json_path}")
+    console.print(f"[green]JSON:[/green] {json_path}")
 
-    # Markdown aggregate report
     md_path = output / f"benchmark_{ts}.md"
     _write_aggregate_md(rows, cfg, md_path)
-    console.print(f"[green]Report saved:[/green] {md_path}")
+    console.print(f"[green]Report:[/green] {md_path}")
 
     _print_aggregate_table(rows)
 
@@ -165,14 +180,14 @@ def _print_row_summary(row: dict) -> None:
         console.print(f"  [red]ERROR: {row['error']}[/red]")
         return
     console.print(
-        f"  Pipeline — CER={row.get('pipeline_cer','?'):.3f}  "
-        f"WER={row.get('pipeline_wer','?'):.3f}  "
-        f"BLEU={row.get('pipeline_bleu','?'):.2f}"
+        f"  Pipeline — CER={row.get('pipeline_cer', '?'):.3f}  "
+        f"WER={row.get('pipeline_wer', '?'):.3f}  "
+        f"BLEU={row.get('pipeline_bleu', '?'):.2f}"
     )
     console.print(
-        f"  VLM      — CER={row.get('vlm_cer','?'):.3f}  "
-        f"WER={row.get('vlm_wer','?'):.3f}  "
-        f"BLEU={row.get('vlm_bleu','?'):.2f}"
+        f"  VLM      — CER={row.get('vlm_cer', '?'):.3f}  "
+        f"WER={row.get('vlm_wer', '?'):.3f}  "
+        f"BLEU={row.get('vlm_bleu', '?'):.2f}"
     )
 
 
@@ -188,7 +203,7 @@ def _print_aggregate_table(rows: list[dict]) -> None:
     table = Table(title=f"Aggregate ({len(valid)} samples)", show_lines=True)
     table.add_column("Metric")
     table.add_column("Pipeline", justify="right")
-    table.add_column("VLM", justify="right")
+    table.add_column("VLM (Qwen3.5-9B)", justify="right")
 
     table.add_row("CER ↓",   f"{mean('pipeline_cer'):.3f}",  f"{mean('vlm_cer'):.3f}")
     table.add_row("WER ↓",   f"{mean('pipeline_wer'):.3f}",  f"{mean('vlm_wer'):.3f}")
@@ -210,7 +225,7 @@ def _write_aggregate_md(rows: list[dict], cfg: dict, path: Path) -> None:
         "# Benchmark Aggregate Report\n",
         f"**Date:** {datetime.utcnow().isoformat()}  ",
         f"**Samples:** {len(valid)} / {len(rows)}  ",
-        f"**VLM model:** `{cfg.get('vlm_model')}`  ",
+        f"**VLM:** `{cfg.get('vlm_model')}` @ `{cfg.get('vlm_api_base')}`  ",
         f"**Corrector:** `{cfg.get('corrector_model')}`  ",
         f"**OCR backend:** `{cfg.get('ocr_backend')}`  \n",
         "## Aggregate Metrics\n",

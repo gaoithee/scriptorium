@@ -1,13 +1,13 @@
 """
 src/pipeline/correction.py
 ---------------------------
-Small-LM post-correction step.
+Small-LM post-correction step via any OpenAI-compatible endpoint.
 
-Uses a local Ollama model (default: qwen2.5:3b) to clean up the noisy
-OCR output before metric evaluation.
+Uses Qwen3.5-9B (or any other model) to clean up noisy OCR output before
+metric evaluation. Defaults to a lightweight local model so it does not
+compete for GPU memory with the VLM.
 
-The prompt is deliberately minimal: we tell the model to fix OCR errors
-without paraphrasing or adding content.
+Compatible servers: vLLM, SGLang, Ollama (/v1 endpoint), LM Studio, etc.
 """
 from __future__ import annotations
 
@@ -31,24 +31,29 @@ Rules:
 def correct_with_llm(
     raw_text: str,
     model: str = "qwen2.5:3b",
-    ollama_base_url: str = "http://localhost:11434",
+    api_base: str = "http://localhost:11434/v1",
+    api_key: str = "EMPTY",
     language: str = "it",
 ) -> str:
     """
-    Send *raw_text* (noisy OCR output) to a local Ollama model and return
-    the corrected transcription string.
+    Send *raw_text* (noisy OCR output) to an OpenAI-compatible LM endpoint
+    and return the corrected transcription string.
 
     Parameters
     ----------
-    raw_text        : the OCR-produced string to clean up
-    model           : Ollama model tag (e.g. 'qwen2.5:3b', 'qwen2.5:14b')
-    ollama_base_url : base URL of the running Ollama instance
-    language        : hint passed in the user message
+    raw_text : the OCR-produced string to clean up
+    model    : model name as registered in the serving engine
+    api_base : base URL of an OpenAI-compatible server
+               - Ollama:  http://localhost:11434/v1
+               - vLLM:   http://localhost:8000/v1
+               - SGLang: http://localhost:8000/v1
+    api_key  : API key (use "EMPTY" for local servers)
+    language : hint passed in the user message
     """
     try:
-        import ollama
+        from openai import OpenAI
     except ImportError as e:
-        raise ImportError("Run: pip install ollama") from e
+        raise ImportError("Run: pip install openai") from e
 
     if not raw_text.strip():
         logger.warning("correction.py received empty OCR text — skipping LM call")
@@ -60,21 +65,22 @@ def correct_with_llm(
         f"corrected text.\n\n---\n{raw_text}\n---"
     )
 
-    logger.info("Calling Ollama model '%s' for post-correction", model)
+    logger.info("Calling '%s' @ %s for post-correction", model, api_base)
 
-    client = ollama.Client(host=ollama_base_url)
-    response = client.chat(
+    client = OpenAI(base_url=api_base, api_key=api_key)
+    response = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user",   "content": user_message},
         ],
-        options={"temperature": 0.0},  # deterministic
+        temperature=0.0,
+        max_tokens=2048,
     )
 
-    corrected = response["message"]["content"]
+    corrected = response.choices[0].message.content or raw_text
     corrected = _strip_markdown_fences(corrected).strip()
-    logger.info("Post-correction done (%d → %d chars)", len(raw_text), len(corrected))
+    logger.info("Post-correction: %d → %d chars", len(raw_text), len(corrected))
     return corrected
 
 

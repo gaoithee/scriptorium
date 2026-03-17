@@ -1,135 +1,177 @@
-# handwriting-ocr-benchmark
+<p align="center">
+  <img src="assets/mascot.png" width="600" alt="Scriptorium Mascot">
+</p>
 
-A benchmark pipeline that compares **two approaches** to transcribing handwritten text from images:
+# scriptorium
+
+> **Note on the name:** In medieval times, the *scriptorium* was the dedicated room in a monastery where monks (amanuenses) painstakingly transcribed and preserved manuscripts. This benchmark honors that tradition by testing how modern "digital scribes" handle the complexities of human handwriting.
+
+**scriptorium** is a benchmark pipeline for handwritten text transcription. It compares a classic modular OCR pipeline against a **VLM end-to-end** approach using **Qwen3.5-9B**, evaluated against a gold standard string.
 
 | Approach | Description |
 |---|---|
-| **Pipeline** | Layout detection (DocTR / YOLO) → OCR (Tesseract / EasyOCR) → small LM post-correction |
-| **VLM end-to-end** | Qwen2.5-VL (7B/72B) reads the image directly and returns the transcription |
+| **Classic pipeline** | Layout detection (DocTR) → OCR (EasyOCR / Tesseract) → LM post-correction |
+| **VLM end-to-end** | Qwen3.5-9B reads the image directly via OpenAI-compatible API |
 
-Results are compared against a user-supplied **gold string** using CER, WER, and BLEU.
+**Metrics:** CER, WER, and BLEU calculated against your gold transcription.
 
 ---
 
-## Repo structure
+## Structure
 
 ```
-handwriting-ocr-benchmark/
+
+scriptorium/
+├── assets/          \# Project images and mascots
 ├── src/
 │   ├── pipeline/
-│   │   ├── layout.py        # layout detection (DocTR bounding boxes)
-│   │   ├── ocr.py           # OCR backends (Tesseract, EasyOCR)
-│   │   └── correction.py    # small-LM post-correction via Ollama
+│   │   ├── preprocess.py    \# deskew, denoise, CLAHE, upscale
+│   │   ├── layout.py        \# DocTR bounding-box detection
+│   │   ├── ocr.py           \# EasyOCR / Tesseract, per-region loop
+│   │   └── correction.py    \# LM post-correction (OpenAI-compat API)
 │   ├── models/
-│   │   └── vlm.py           # Qwen2.5-VL inference (local via Ollama or HF)
+│   │   ├── vlm.py           \# Qwen3.5-9B via OpenAI-compat API (vLLM / SGLang)
+│   │   └── vlm\_hf.py        \# Qwen3.5-9B via HuggingFace Transformers (direct load)
 │   └── eval/
-│       └── metrics.py       # CER, WER, BLEU, pretty diff
-├── data/
-│   ├── samples/             # input images (put your .jpg/.png here)
-│   └── gold/                # gold .txt files (same stem as the image)
-├── results/                 # JSON + Markdown reports (auto-generated)
+│       └── metrics.py       \# CER, WER, BLEU, char diff
 ├── scripts/
-│   └── run_benchmark.py     # main CLI entry point
+│   ├── run\_benchmark.py     \# single-image CLI
+│   ├── eval\_dataset.py      \# batch evaluation → CSV + Markdown
+│   └── app.py               \# Gradio web UI
+├── data/
+│   ├── samples/             \# input images (.jpg / .png)
+│   └── gold/                \# matching \<stem\>.txt ground-truth files
+├── results/                 \# auto-generated reports (git-ignored)
 ├── tests/
-│   └── test_metrics.py
-├── docs/
-│   └── architecture.md
-├── requirements.txt
-├── pyproject.toml
-└── .github/
-    └── workflows/
-        └── ci.yml
-```
+├── config.example.yaml
+└── pyproject.toml
+
+````
 
 ---
 
-## Quick start
+## Quickstart
+
+### 1. Install
 
 ```bash
-# 1. clone
-git clone https://github.com/your-org/handwriting-ocr-benchmark
-cd handwriting-ocr-benchmark
-
-# 2. install (Python ≥ 3.10)
+git clone [https://github.com/gaoithee/scriptorium](https://github.com/gaoithee/scriptorium)
+cd scriptorium
 pip install -e ".[dev]"
+````
 
-# 3. install Ollama + models (for local inference)
-ollama pull qwen2.5vl:7b       # VLM end-to-end
-ollama pull qwen2.5:3b         # small-LM post-corrector
-
-# 4. place your image and gold string
-cp my_scan.jpg data/samples/
-echo "my gold text here" > data/gold/my_scan.txt
-
-# 5. run
-python scripts/run_benchmark.py \
-    --image data/samples/my_scan.jpg \
-    --gold  data/gold/my_scan.txt \
-    --output results/
-```
-
-Or pass gold inline:
+### 2\. Serve Qwen3.5-9B
 
 ```bash
+# vLLM (recommended)
+pip install vllm --torch-backend=auto --extra-index-url [https://wheels.vllm.ai/nightly](https://wheels.vllm.ai/nightly)
+vllm serve Qwen/Qwen3.5-9B --reasoning-parser qwen3 --port 8000
+
+# SGLang
+pip install 'git+[https://github.com/sgl-project/sglang.git#subdirectory=python&egg=sglang](https://github.com/sgl-project/sglang.git#subdirectory=python&egg=sglang)[all]'
+python -m sglang.launch_server --model-path Qwen/Qwen3.5-9B --reasoning-parser qwen3 --port 8000
+```
+
+Both expose an OpenAI-compatible endpoint at `http://localhost:8000/v1`.
+
+For the **classic pipeline corrector**, any small model via Ollama works:
+
+```bash
+ollama pull qwen2.5:3b   # serves at http://localhost:11434/v1
+```
+
+### 3\. Configure
+
+```bash
+cp config.example.yaml config.yaml
+# edit if your ports / models differ
+```
+
+### 4\. Run
+
+```bash
+# single image
 python scripts/run_benchmark.py \
-    --image  data/samples/my_scan.jpg \
-    --gold-string "Il cielo è azzurro" \
-    --output results/
+  --image data/samples/my_scan.jpg \
+  --gold  data/gold/my_scan.txt
+
+# or inline gold
+python scripts/run_benchmark.py \
+  --image data/samples/my_scan.jpg \
+  --gold-string "testo originale"
+
+# full dataset
+python scripts/eval_dataset.py
+
+# web UI
+python scripts/app.py   →  http://localhost:7860
 ```
 
----
+-----
 
-## Approaches in detail
+## Pipelines
 
-### 1. Classic pipeline
+**Classic**
 
 ```
-Image → DocTR layout (line bounding boxes)
-      → EasyOCR (per line)
-      → concatenate raw OCR string
-      → Qwen2.5:3b (post-correction prompt)
-      → final string
+image → preprocess (deskew/denoise/CLAHE)
+      → DocTR (line bboxes)
+      → EasyOCR per region
+      → LM post-correction (any OpenAI-compat model)
+      → string
 ```
 
-### 2. VLM end-to-end (Qwen2.5-VL)
+**VLM**
 
-The image is sent directly to `qwen2.5vl:7b` (or `:72b`) with a structured prompt asking for a verbatim transcription. No preprocessing required.
+```
+image (base64) → Qwen3.5-9B (thinking disabled) → string
+```
 
----
+Qwen3.5-9B is a **native multimodal model** (early fusion vision encoder), not a separate vision adapter. Thinking mode is disabled by default for OCR — faster and cleaner output.
+
+-----
 
 ## Metrics
 
-| Metric | Library | Notes |
-|---|---|---|
-| **CER** | `jiwer` | Character Error Rate |
-| **WER** | `jiwer` | Word Error Rate |
-| **BLEU** | `sacrebleu` | unigram-4gram |
-| **Diff** | `difflib` | coloured character diff |
+| Metric | Library |
+|---|---|
+| CER | `jiwer` |
+| WER | `jiwer` |
+| BLEU | `sacrebleu` |
+| char diff | `difflib` |
 
----
+-----
 
 ## Configuration
 
-Copy and edit `config.example.yaml`:
-
 ```yaml
-ollama_base_url: "http://localhost:11434"
-vlm_model: "qwen2.5vl:7b"          # or qwen2.5vl:72b
-corrector_model: "qwen2.5:3b"       # post-correction LM
-ocr_backend: "easyocr"              # easyocr | tesseract
-layout_backend: "doctr"             # doctr | none
-language: "it"                      # passed to OCR
+# config.example.yaml
+vlm_api_base:  "http://localhost:8000/v1"
+vlm_api_key:   "EMPTY"
+vlm_model:     "Qwen/Qwen3.5-9B"
+vlm_thinking:  false               # keep false for OCR
+
+corrector_api_base: "http://localhost:11434/v1"
+corrector_api_key:  "EMPTY"
+corrector_model:    "qwen2.5:3b"
+
+ocr_backend:    "easyocr"          # easyocr | tesseract
+layout_backend: "doctr"            # doctr | none
+language:       "it"
+preprocess:     true
 ```
 
----
+-----
 
-## Adding new samples
+## Adding samples
 
-1. Drop the image in `data/samples/`
-2. Create a matching `data/gold/<stem>.txt` with the gold transcription
-3. Run `python scripts/run_benchmark.py --all`
+```bash
+cp my_scan.jpg data/samples/
+echo "testo gold" > data/gold/my_scan.txt
+python scripts/eval_dataset.py
+```
 
----
+-----
 
 ## License
 
